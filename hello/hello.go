@@ -61,6 +61,12 @@ func inference(){
 	fmt.Printf("Type of %v is %T", v, v)
 	fmt.Printf("Type of %v is %T", x, x)}
 
+const (
+	Big = 1 << 100
+	Small 
+	)
+ 
+
 func main() {
 	
 	fmt.Printf("Hello Aryan.\n")
