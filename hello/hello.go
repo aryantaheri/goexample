@@ -127,6 +127,12 @@ func pointers(){
 	fmt.Println(j) // see the new value of j
 
 }
+
+const (
+	Big = 1 << 100
+	Small 
+	)
+ 
 func main() {
 	
 	fmt.Printf("Hello Aryan.\n")
