@@ -41,7 +41,7 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 }
 
 func main() {
-	words.wordList = make([]string, 100)
+	words.wordList = make([]string, 0)
 	words.wordMap = make(map[string]int)
 	url := "http://wiki.ux.uis.no/foswiki/Info/WebHome"
 //	url := "http://www.ux.uis.no/~aryan/testPage.html"
@@ -54,7 +54,7 @@ func main() {
 func printWords(words Words) {
 	for i, word := range words.wordList {
 		if word != "" {
-			fmt.Printf("Rank:%v  %v #%v\n", i, word, words.wordMap[word])
+			fmt.Printf("Rank:%v  %q #%v\n", i, word, words.wordMap[word])
 		}
 	}
 }
@@ -69,7 +69,7 @@ type fakeResult struct {
 // returns body, []urls, error
 func (f fakeFetcher) Fetch(url string) ([]string, []string, error) {
 	response, err := http.Get(url)
-	fmt.Printf("Fetch	URL:%v\n	Reponse: %v\n	Err: %v\n", url, response, err)
+	fmt.Printf("Fetch	URL:%v\n	Reponse: %q\n	Err: %v\n", url, response, err)
 	if response.StatusCode != http.StatusOK {
 		log.Println("Return StatusCode is not OK: ", response.Status)
 		return nil, nil, fmt.Errorf("Return StatusCode for URL: %v is not OK: %s", url, response.Status)
@@ -80,7 +80,7 @@ func (f fakeFetcher) Fetch(url string) ([]string, []string, error) {
 	}
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
-	fmt.Printf("READALL:\n	Body:	%q\n	Err: %v\n", body, err)
+	fmt.Printf("READALL:\n	Body:	%+q\n	Err: %v\n", body, err)
 	if err != nil {
 		log.Println(err)
 	}
@@ -91,7 +91,7 @@ func (f fakeFetcher) Fetch(url string) ([]string, []string, error) {
 		log.Println(err)
 	}
 	
-	text, urls, err := parseNode(node, url)
+	text, urls, err := parseNode(node, url, false)
 	
 	fmt.Println("TEXT: ", text)
 	fmt.Println("URLS: ", urls)
@@ -100,7 +100,7 @@ func (f fakeFetcher) Fetch(url string) ([]string, []string, error) {
 }
 
 
-func parseNode(n *html.Node, base string) ([]string, []string, error) {
+func parseNode(n *html.Node, base string, includeText bool) ([]string, []string, error) {
 		urls := make([]string, 0)
 		text := make([]string, 0)
 		
@@ -111,10 +111,13 @@ func parseNode(n *html.Node, base string) ([]string, []string, error) {
 		switch n.Type {
 			case html.TextNode:
 				fmt.Println("NodeType: TextNode ", n.Type, n.Data, n.DataAtom, n.Attr) 
-//			case html.DocumentNode:
-//				fmt.Println("NodeType: DocumentNode ", n.Type) 
-//			case html.ElementNode:
-//				fmt.Println("NodeType: ElementNode ", n.Type, n.Data, n.DataAtom, n.Namespace, n.Attr) 
+			case html.DocumentNode:
+				fmt.Println("NodeType: DocumentNode ", n.Data, n.Attr) 
+			case html.ElementNode:
+				fmt.Println("NodeType: ElementNode ", n.Data, n.Attr) 
+				if strings.ToLower(n.Data) == "body" {
+					includeText = true
+				} 
 //			case html.CommentNode:
 //				fmt.Println("NodeType: CommentNode ", n.Type) 
 //			case html.DoctypeNode:
@@ -124,7 +127,6 @@ func parseNode(n *html.Node, base string) ([]string, []string, error) {
 //			default :
 //				fmt.Println("NodeType: UNKNOW ", n.Type) 
 		}
-		
 		if n.Type == html.ElementNode  {
 			for _, a := range n.Attr {
 				if a.Key == "href" {
@@ -138,17 +140,17 @@ func parseNode(n *html.Node, base string) ([]string, []string, error) {
 					break
 				}
 			}
-		} else if n.Type == html.TextNode {
+		} else if n.Type == html.TextNode && includeText {
 			data := strings.TrimSpace(n.Data)
 			data = strings.Trim(data, "1234567890`~!@#$%^&*()_+-=][\\';}{|\":/.,<>?")
 			if data != "" {
-//				fmt.Printf("	Text: %v\n", data)
+				fmt.Printf("	Text: %v\n", string(data))
 				text = append(text, data)
 			}
 		}
 		
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			childText, childUrls, childError := parseNode(c, base)
+			childText, childUrls, childError := parseNode(c, base, includeText)
 			text = append(text, childText...)
 			urls = append(urls, childUrls...) 
 			if childError != nil {
