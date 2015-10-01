@@ -6,14 +6,16 @@ import (
 	"sort"
 	"net/http"
 	"io/ioutil"
-	"io"
 	"golang.org/x/net/html"
+	"log"
+	"net/url"
 )
+
 
 type Fetcher interface {
 	// Fetch returns the body of URL and
 	// a slice of URLs found on that page.
-	Fetch(url string) (body string, urls []string, err error)
+	Fetch(url string) (body []string, urls []string, err error)
 }
 
 // Crawl uses fetcher to recursively crawl
@@ -28,9 +30,10 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 	body, urls, err := fetcher.Fetch(url)
 	if err != nil {
 		fmt.Println(err)
-		return
+//		return
 	}
-	fmt.Printf("found: %s %q\n", url, body)
+	wordCount(body)
+//	fmt.Printf("found: %s %q\n", url, body)
 	for _, u := range urls {
 		Crawl(u, depth-1, fetcher)
 	}
@@ -40,8 +43,11 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 func main() {
 	words.wordList = make([]string, 100)
 	words.wordMap = make(map[string]int)
-	Crawl("http://wiki.ux.uis.no/foswiki/Info/WebHome", 4, fetcher)
+	url := "http://wiki.ux.uis.no/foswiki/Info/WebHome"
+//	url := "http://www.ux.uis.no/~aryan/testPage.html"
+	Crawl(url, 1, fetcher)
 	sort.Sort(sort.Reverse(&words))
+	fmt.Println("Words extracted from ", url)
 	printWords(words)
 }
 
@@ -60,55 +66,99 @@ type fakeResult struct {
 	urls []string
 }
 
-func (f fakeFetcher) Fetch(url string) (string, []string, error) {
+// returns body, []urls, error
+func (f fakeFetcher) Fetch(url string) ([]string, []string, error) {
 	response, err := http.Get(url)
 	fmt.Printf("Fetch	URL:%v\n	Reponse: %v\n	Err: %v\n", url, response, err)
-	if err != nil {
-		// handle error
+	if response.StatusCode != http.StatusOK {
+		log.Println("Return StatusCode is not OK: ", response.Status)
+		return nil, nil, fmt.Errorf("Return StatusCode for URL: %v is not OK: %s", url, response.Status)
 	}
-//	defer response.Body.Close()
+	if err != nil {
+		log.Println(err)
+		return nil, nil, err
+	}
+	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
-	fmt.Printf("Body:\n	%q\n	%v\n", body, err)
+	fmt.Printf("READALL:\n	Body:	%q\n	Err: %v\n", body, err)
+	if err != nil {
+		log.Println(err)
+	}
 	
 //	wordCount(string(body))
+	node, err := html.Parse(strings.NewReader(string(body)))
+	if err != nil {
+		log.Println(err)
+	}
 	
-	urls := getUrls(response.Body)
-	fmt.Printf("URLS:\n%v\n", urls)
-	return string(body), urls, nil
-//	if res, ok := f[url]; ok {
-//		return res.body, res.urls, nil
-//	}
-//	return "", nil, fmt.Errorf("not found: %s", url)
+	text, urls, err := parseNode(node, url)
+	
+	fmt.Println("TEXT: ", text)
+	fmt.Println("URLS: ", urls)
+	fmt.Println("ERROR: ", err)
+	return text, urls, err
 }
 
-func getUrls(body io.ReadCloser) []string {
-	page := html.NewTokenizer(body)
-	
-	urls := make([]string, 0)
-	fmt.Println("getUrls")
-	for {
-		tokenType := page.Next()
-		fmt.Println("getUrls, tokenType: ", tokenType)
-		switch tokenType {
-			case html.TextToken:
-				wordCount(string(page.Text()))
-			case html.StartTagToken:
-				token := page.Token()
-				if token.DataAtom.String() == "a" {
-					for _, attr := range token.Attr {
-						if attr.Key == "href" {
-							urls = append(urls, attr.Val)
-						}
-					}
-				}
-			case html.ErrorToken:
-				fmt.Println("ErrorToken: ", page.Err())
-				return urls
-				
+
+func parseNode(n *html.Node, base string) ([]string, []string, error) {
+		urls := make([]string, 0)
+		text := make([]string, 0)
+		
+		baseUrl, err := url.Parse(base)
+		if err != nil {
+			log.Println(err)
 		}
-	}
-	return urls
-}	
+		switch n.Type {
+			case html.TextNode:
+				fmt.Println("NodeType: TextNode ", n.Type, n.Data, n.DataAtom, n.Attr) 
+//			case html.DocumentNode:
+//				fmt.Println("NodeType: DocumentNode ", n.Type) 
+//			case html.ElementNode:
+//				fmt.Println("NodeType: ElementNode ", n.Type, n.Data, n.DataAtom, n.Namespace, n.Attr) 
+//			case html.CommentNode:
+//				fmt.Println("NodeType: CommentNode ", n.Type) 
+//			case html.DoctypeNode:
+//				fmt.Println("NodeType: DoctypeNode ", n.Type)
+//			case html.ErrorNode:
+//				fmt.Println("NodeType: ErrorNode ", n.Type) 
+//			default :
+//				fmt.Println("NodeType: UNKNOW ", n.Type) 
+		}
+		
+		if n.Type == html.ElementNode  {
+			for _, a := range n.Attr {
+				if a.Key == "href" {
+					l := strings.TrimSpace(a.Val)
+					lo, _ := url.Parse(l)
+					if !lo.IsAbs() {
+						lo = baseUrl.ResolveReference(lo)
+					}
+//					fmt.Printf("	Link: %v\n", lo)
+					urls = append(urls, lo.String())
+					break
+				}
+			}
+		} else if n.Type == html.TextNode {
+			data := strings.TrimSpace(n.Data)
+			data = strings.Trim(data, "1234567890`~!@#$%^&*()_+-=][\\';}{|\":/.,<>?")
+			if data != "" {
+//				fmt.Printf("	Text: %v\n", data)
+				text = append(text, data)
+			}
+		}
+		
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			childText, childUrls, childError := parseNode(c, base)
+			text = append(text, childText...)
+			urls = append(urls, childUrls...) 
+			if childError != nil {
+				log.Fatal(childError)
+			}
+		}
+		
+		return text, urls, nil
+		
+}
 
 type Words struct {
 	wordMap map[string]int
@@ -129,18 +179,21 @@ func (words *Words) Swap(i, j int)  {
 	words.wordList[i], words.wordList[j] = words.wordList[j], words.wordList[i] 
 } 
 
-func wordCount(body string) {
-	fields := strings.Fields(body)
-	fmt.Println("wordCount")
-	for i, field := range fields {
-		fmt.Printf("	field %d %s\n", i, field)
-		word := cleanWord(field)
-		if _, exist := words.wordMap[word]; !exist {
-			words.wordList = append(words.wordList, word)
+func wordCount(bodies []string) {
+	for _, body := range bodies {		
+		fields := strings.Fields(body)
+//		fmt.Println("wordCount")
+		for _, field := range fields {
+//			fmt.Printf("	field %d %s\n", i, field)
+			word := cleanWord(field)
+			if _, exist := words.wordMap[word]; !exist {
+				words.wordList = append(words.wordList, word)
+			}
+			words.wordMap[word] += 1 
 		}
-		words.wordMap[word] += 1 
 	}
 }
+
 
 func cleanWord(word string) string {
 	word = strings.Trim(word, " ~!@#$%^&*()_+}{|\":?></.,][';=-0987654321`\\")
