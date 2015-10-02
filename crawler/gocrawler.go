@@ -9,6 +9,7 @@ import (
 	"golang.org/x/net/html"
 	"log"
 	"net/url"
+	"unicode"
 )
 
 
@@ -43,17 +44,18 @@ func Crawl(url string, depth int, fetcher Fetcher) {
 func main() {
 	words.wordList = make([]string, 0)
 	words.wordMap = make(map[string]int)
-	url := "http://wiki.ux.uis.no/foswiki/Info/WebHome"
+//	url := "http://wiki.ux.uis.no/foswiki/Info/WebHome"
+	url := "http://www.vg.no/"
 //	url := "http://www.ux.uis.no/~aryan/testPage.html"
-	Crawl(url, 1, fetcher)
+	Crawl(url, 4, fetcher)
 	sort.Sort(sort.Reverse(&words))
 	fmt.Println("Words extracted from ", url)
-	printWords(words)
+	printWords(words, 1000)
 }
 
-func printWords(words Words) {
+func printWords(words Words, top int) {
 	for i, word := range words.wordList {
-		if word != "" {
+		if word != "" && i < top {
 			fmt.Printf("Rank:%v  %q #%v\n", i, word, words.wordMap[word])
 		}
 	}
@@ -68,6 +70,10 @@ type fakeResult struct {
 
 // returns body, []urls, error
 func (f fakeFetcher) Fetch(url string) ([]string, []string, error) {
+	if !strings.HasPrefix(url, "http") {
+		return nil, nil, fmt.Errorf("Protocol not supported for URL: %v ", url)
+
+	}
 	response, err := http.Get(url)
 	fmt.Printf("Fetch	URL:%v\n	Reponse: %q\n	Err: %v\n", url, response, err)
 	if response.StatusCode != http.StatusOK {
@@ -110,14 +116,24 @@ func parseNode(n *html.Node, base string, includeText bool) ([]string, []string,
 		}
 		switch n.Type {
 			case html.TextNode:
-				fmt.Println("NodeType: TextNode ", n.Type, n.Data, n.DataAtom, n.Attr) 
+				fmt.Println("NodeType: TextNode ")
+//				fmt.Println("NodeType: TextNode ", n.Type, n.Data, n.DataAtom, n.Attr) 
 			case html.DocumentNode:
 				fmt.Println("NodeType: DocumentNode ", n.Data, n.Attr) 
 			case html.ElementNode:
 				fmt.Println("NodeType: ElementNode ", n.Data, n.Attr) 
 				if strings.ToLower(n.Data) == "body" {
 					includeText = true
-				} 
+				} else if strings.ToLower(n.Data) == "p" || strings.ToLower(n.Data) == "b" ||
+							strings.ToLower(n.Data) == "em" || strings.ToLower(n.Data) == "i" ||
+							strings.ToLower(n.Data) == "small" || strings.ToLower(n.Data) == "strong" ||
+							strings.ToLower(n.Data) == "sub" || strings.ToLower(n.Data) == "sup" ||
+							strings.ToLower(n.Data) == "ins" || strings.ToLower(n.Data) == "del" ||
+							strings.ToLower(n.Data) == "mark" {
+					includeText = true
+				} else {
+					includeText = false
+				}
 //			case html.CommentNode:
 //				fmt.Println("NodeType: CommentNode ", n.Type) 
 //			case html.DoctypeNode:
@@ -132,6 +148,9 @@ func parseNode(n *html.Node, base string, includeText bool) ([]string, []string,
 				if a.Key == "href" {
 					l := strings.TrimSpace(a.Val)
 					lo, _ := url.Parse(l)
+					if lo == nil {
+						continue
+					}
 					if !lo.IsAbs() {
 						lo = baseUrl.ResolveReference(lo)
 					}
@@ -141,8 +160,13 @@ func parseNode(n *html.Node, base string, includeText bool) ([]string, []string,
 				}
 			}
 		} else if n.Type == html.TextNode && includeText {
-			data := strings.TrimSpace(n.Data)
-			data = strings.Trim(data, "1234567890`~!@#$%^&*()_+-=][\\';}{|\":/.,<>?")
+			f := func(c rune) bool { 
+    			return !unicode.IsLetter(c)
+    		}
+			
+			data := strings.TrimFunc(n.Data, f)
+//			data := strings.Trim(n.Data, "1234567890`~!@#$%^&*()_+-=][\\';}{|\":/.,<>? – « »")
+//			data = strings.TrimSpace(data)
 			if data != "" {
 				fmt.Printf("	Text: %v\n", string(data))
 				text = append(text, data)
